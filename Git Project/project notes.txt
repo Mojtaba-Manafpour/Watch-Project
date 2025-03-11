@@ -1,0 +1,6 @@
+Watch Project Requirements:
+1x ESP32
+1x DHT11
+1x LCD 16x2
+3x LED
+1x Breadboard
