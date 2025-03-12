@@ -1,7 +1,0 @@
-The Watch Project:
-1st version added including the followings:
-LCD added
-Breadboard added
-ESP32 added
-LEDs added
-DHT22 added
