@@ -1,7 +1,8 @@
 Project adds and removes according to founds & budget:
 1x arduino
-1x fan
-1x heater
-1x water pump
+-> fan removed
+-> heater removed
+-> water pump removed
 -> arduino removed
 -> humidity sensor DHT11
+-> 3x LED added
