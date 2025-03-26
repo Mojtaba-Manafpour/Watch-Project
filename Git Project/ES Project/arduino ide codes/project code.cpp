@@ -1,5 +1,16 @@
 #include <Wire.h>
 #include <LiquidCrystal.h>
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <DHT_U.h>
+
+#define DHTPIN 14      
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
+
+#define LED_FAN  19   
+#define LED_HEATER  23  
+#define LED_WATER  0  
 
 #define RS 2 
 #define EN 4
@@ -10,36 +21,49 @@
 
 LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
 
-int hours = 12, minutes = 30, seconds = 0;
-unsigned long prevMillis = 0;
-
 void setup() {
-  lcd.begin(16, 2);  
+  Serial.begin(115200);
+  dht.begin();
+  
+  pinMode(LED_FAN, OUTPUT);
+  pinMode(LED_HEATER, OUTPUT);
+  pinMode(LED_WATER, OUTPUT);
+
+  lcd.begin(16, 2);
   lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: --.- C");
 }
 
 void loop() {
-  if (millis() - prevMillis >= 500) { 
-    prevMillis = millis();
-    seconds++;
-    
-    if (seconds == 60) {
-      seconds = 0;
-      minutes++;
-    }
-    if (minutes == 60) {
-      minutes = 0;
-      hours++;
-    }
-    if (hours == 24) {
-      hours = 0;
-    }
+  float temp = dht.readTemperature(); 
+  temp = dht.getTemperature();
 
-    lcd.setCursor(0, 0);
-    lcd.print("Time: ");
-
-    char timeStr[9];  
-    sprintf(timeStr, "%02d:%02d:%02d", hours, minutes, seconds);
-    lcd.print(timeStr);
+  if (isnan(temp)) {
+    Serial.println("temp error");
+    return;
   }
+
+  Serial.print("temp: ");
+  Serial.print(temp);
+  Serial.println(" C");
+
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: ");
+  lcd.print(temp);
+  lcd.print(" C");
+
+  if (temp >= 20) {  
+    digitalWrite(LED_FAN, HIGH);
+  } else {
+    digitalWrite(LED_FAN, LOW);
+  }
+
+  if (temp <= 18) {  
+    digitalWrite(LED_HEATER, HIGH);
+  } else {
+    digitalWrite(LED_HEATER, LOW);
+  }
+
+  delay(2000);
 }
