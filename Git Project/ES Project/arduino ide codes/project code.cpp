@@ -1,18 +1,18 @@
 #include <WiFi.h>
-#include <WebServer.h> 
+#include <WebServer.h>
 #include <Wire.h>
 #include <LiquidCrystal.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
 
-#define DHTPIN 14      
-#define DHTTYPE DHT22   
+#define DHTPIN 14
+#define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-#define LED_FAN  19   
-#define LED_HEATER  23  
-#define LED_WATER  0    
+#define LED_FAN 19
+#define LED_HEATER 23
+#define LED_WATER 0
 
 #define RS 2 
 #define EN 4
@@ -23,47 +23,68 @@ DHT dht(DHTPIN, DHTTYPE);
 
 LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
 
+const char* ssid = "UTEL";
+const char* password = "";
+
+WebServer server(80);
+
+float fanThreshold = 25.0;    
+float heaterThreshold = 20.0;
+float waterThreshold = 15.0;  
+
 int hours = 12, minutes = 30, seconds = 0;
 unsigned long prevMillis = 0, prevTempMillis = 0;
-float lastTemp = dht.readTemperature();
+float lastTemp = -100;
 
-const char* ssid = "UTEL";  
-const char* password = "";  
+void sendHtml() {
+  String html = R"rawliteral(
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Greenhouse Control</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <script>
+          function updateData() {
+            fetch("/status")
+              .then(response => response.json())
+              .then(data => {
+                document.getElementById("time").innerText = data.time;
+                document.getElementById("temp").innerText = data.temperature + " C";
+                document.getElementById("fan").innerText = data.fan;
+                document.getElementById("heater").innerText = data.heater;
+                document.getElementById("water").innerText = data.water;
+              });
+          }
+          setInterval(updateData, 2000);
+        </script>
+      </head>
+      <body>
+        <h2>Greenhouse Control Panel</h2>
+        <p>Time: <span id="time">--:--:--</span></p>
+        <p>Temperature: <span id="temp">--.- C</span></p>
+        <p>Fan: <span id="fan">OFF</span></p>
+        <p>Heater: <span id="heater">OFF</span></p>
+        <p>Water: <span id="water">OFF</span></p>
+      </body>
+    </html>
+  )rawliteral";
 
-WebServer server(80);  
-
-void handleRoot() {
-  float temp = dht.readTemperature();
-  String html = "<html><head>";
-  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<style>button {font-size: 20px; margin: 10px;}</style></head><body>";
-  html += "<h2>Greenhouse Control</h2>";
-  html += "<p>Time: " + String(hours) + ":" + String(minutes) + ":" + String(seconds) + "</p>";
-  html += "<p>Temperature: " + String(temp) + " C</p>";
-  html += "<button onclick='toggleFan()'>Toggle Fan</button>";
-  html += "<button onclick='toggleHeater()'>Toggle Heater</button>";
-  html += "<button onclick='toggleWater()'>Toggle Water</button>";
-  html += "<script>";
-  html += "function toggleFan() {fetch('/fan');}";
-  html += "function toggleHeater() {fetch('/heater');}";
-  html += "function toggleWater() {fetch('/water');}";
-  html += "</script></body></html>";
   server.send(200, "text/html", html);
 }
 
-void toggleFan() {
-  digitalWrite(LED_FAN, !digitalRead(LED_FAN));
-  server.send(200, "text/plain", "Fan toggled");
+void sendStatus() {
+  float temp = dht.readTemperature();
+  String json = "{";
+  json += "\"time\":\"" + String(hours) + ":" + String(minutes) + ":" + String(seconds) + "\",";
+  json += "\"temperature\":\"" + String(lastTemp) + "\",";
+  if (!isnan(temp)) {
+    digitalWrite(LED_FAN, (temp >= fanThreshold) ? HIGH : LOW);
+    digitalWrite(LED_HEATER, (temp <= heaterThreshold) ? HIGH : LOW);
+    digitalWrite(LED_WATER, (temp <= waterThreshold) ? HIGH : LOW);
 }
-
-void toggleHeater() {
-  digitalWrite(LED_HEATER, !digitalRead(LED_HEATER));
-  server.send(200, "text/plain", "Heater toggled");
-}
-
-void toggleWater() {
-  digitalWrite(LED_WATER, !digitalRead(LED_WATER));
-  server.send(200, "text/plain", "Water toggled");
+  json += "}";
+  
+  server.send(200, "application/json", json);
 }
 
 void setup() {
@@ -87,16 +108,14 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("Temp: --.- C");
 
-  server.on("/", handleRoot);
-  server.on("/fan", toggleFan);
-  server.on("/heater", toggleHeater);
-  server.on("/water", toggleWater);
+  server.on("/", sendHtml);
+  server.on("/status", sendStatus);
 
   server.begin();
 }
 
 void loop() {
-  server.handleClient();  
+  server.handleClient();
 
   unsigned long currentMillis = millis();
 
@@ -129,8 +148,9 @@ void loop() {
       lcd.print(temp);
       lcd.print(" C  ");
 
-      digitalWrite(LED_FAN, temp >= 20 ? HIGH : LOW);
-      digitalWrite(LED_HEATER, temp <= 18 ? HIGH : LOW);
+      digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
+      digitalWrite(LED_HEATER, temp <= heaterThreshold ? HIGH : LOW);
+      digitalWrite(LED_WATER, temp <= waterThreshold ? HIGH : LOW);
     }
   }
 }
