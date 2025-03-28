@@ -28,60 +28,63 @@ const char* password = "";
 
 WebServer server(80);
 
-float fanThreshold = 25.0;    
-float heaterThreshold = 20.0;
+float fanThreshold = 30.0;    
+float heaterThreshold = 25.0; 
 float waterThreshold = 15.0;  
 
 int hours = 12, minutes = 30, seconds = 0;
 unsigned long prevMillis = 0, prevTempMillis = 0;
-float lastTemp = -100;
+float lastTemp = dht.readTemperature();
 
 void sendHtml() {
-  String html = R"rawliteral(
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Greenhouse Control</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <script>
-          function updateData() {
-            fetch("/status")
-              .then(response => response.json())
-              .then(data => {
-                document.getElementById("time").innerText = data.time;
-                document.getElementById("temp").innerText = data.temperature + " C";
-                document.getElementById("fan").innerText = data.fan;
-                document.getElementById("heater").innerText = data.heater;
-                document.getElementById("water").innerText = data.water;
-              });
-          }
-          setInterval(updateData, 2000);
-        </script>
-      </head>
-      <body>
-        <h2>Greenhouse Control Panel</h2>
-        <p>Time: <span id="time">--:--:--</span></p>
-        <p>Temperature: <span id="temp">--.- C</span></p>
-        <p>Fan: <span id="fan">OFF</span></p>
-        <p>Heater: <span id="heater">OFF</span></p>
-        <p>Water: <span id="water">OFF</span></p>
-      </body>
-    </html>
-  )rawliteral";
-
+  String html = "<!DOCTYPE html><html><head><title>Greenhouse Control</title>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  html += "<script>function updateData() { fetch('/status').then(response => response.json()).then(data => {";
+  html += "document.getElementById('time').innerText = data.time;";
+  html += "document.getElementById('temp').innerText = data.temperature + ' C';";
+  html += "document.getElementById('fan').innerText = data.fan;";
+  html += "document.getElementById('heater').innerText = data.heater;";
+  html += "document.getElementById('water').innerText = data.water;";
+  html += "});} setInterval(updateData, 2000);</script></head><body>";
+  html += "<h2>Greenhouse Control Panel</h2>";
+  html += "<p>Time: <span id='time'>--:--:--</span></p>";
+  html += "<p>Temperature: <span id='temp'>--.- C</span></p>";
+  html += "<p>Fan: <span id='fan'>OFF</span></p>";
+  html += "<p>Heater: <span id='heater'>OFF</span></p>";
+  html += "<p>Water: <span id='water'>OFF</span></p>";
+  html += "<form action='/set' method='POST'>";
+  html += "Fan Threshold: <input type='number' name='fan' step='0.1' value='" + String(fanThreshold) + "'><br>";
+  html += "Heater Threshold: <input type='number' name='heater' step='0.1' value='" + String(heaterThreshold) + "'><br>";
+  html += "Water Threshold: <input type='number' name='water' step='0.1' value='" + String(waterThreshold) + "'><br>";
+  html += "<input type='submit' value='Set Values'>";
+  html += "</form></body></html>";
+  
   server.send(200, "text/html", html);
 }
 
-void sendStatus() {
+void handleSetValues() {
+  if (server.hasArg("fan")) fanThreshold = server.arg("fan").toFloat();
+  if (server.hasArg("heater")) heaterThreshold = server.arg("heater").toFloat();
+  if (server.hasArg("water")) waterThreshold = server.arg("water").toFloat();
+  
   float temp = dht.readTemperature();
+  if (!isnan(temp)) {
+    digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
+    digitalWrite(LED_HEATER, temp <= heaterThreshold ? HIGH : LOW);
+    digitalWrite(LED_WATER, temp <= waterThreshold ? HIGH : LOW);
+  }
+
+  sendHtml();
+}
+
+
+void sendStatus() {
   String json = "{";
   json += "\"time\":\"" + String(hours) + ":" + String(minutes) + ":" + String(seconds) + "\",";
   json += "\"temperature\":\"" + String(lastTemp) + "\",";
-  if (!isnan(temp)) {
-    digitalWrite(LED_FAN, (temp >= fanThreshold) ? HIGH : LOW);
-    digitalWrite(LED_HEATER, (temp <= heaterThreshold) ? HIGH : LOW);
-    digitalWrite(LED_WATER, (temp <= waterThreshold) ? HIGH : LOW);
-}
+  json += "\"fan\":\"" + String(fanThreshold) + "\",";
+  json += "\"heater\":\"" + String(heaterThreshold) + "\",";
+  json += "\"water\":\"" + String(waterThreshold) + "\"";
   json += "}";
   
   server.send(200, "application/json", json);
@@ -94,24 +97,24 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
-
+  
   dht.begin();
   pinMode(LED_FAN, OUTPUT);
   pinMode(LED_HEATER, OUTPUT);
   pinMode(LED_WATER, OUTPUT);
-
+  
   lcd.begin(16, 2);
-  lcd.backlight();
   lcd.setCursor(0, 0);
   lcd.print("Time: --:--:--");
   lcd.setCursor(0, 1);
   lcd.print("Temp: --.- C");
-
+  
   server.on("/", sendHtml);
   server.on("/status", sendStatus);
-
+  server.on("/set", HTTP_POST, handleSetValues);
+  
   server.begin();
+  Serial.println("\nConnected! Open http://" + WiFi.localIP + "in your browser.");
 }
 
 void loop() {
@@ -133,7 +136,7 @@ void loop() {
     lcd.print(timeStr);
   }
 
-  if (currentMillis - prevTempMillis >= 2000) {  
+  if (currentMillis - prevTempMillis >= 1000) {  
     prevTempMillis = currentMillis;
     float temp = dht.readTemperature();
 
@@ -148,9 +151,22 @@ void loop() {
       lcd.print(temp);
       lcd.print(" C  ");
 
-      digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
-      digitalWrite(LED_HEATER, temp <= heaterThreshold ? HIGH : LOW);
-      digitalWrite(LED_WATER, temp <= waterThreshold ? HIGH : LOW);
+      
+      if (temp >= fanThreshold) {
+        digitalWrite(LED_FAN, HIGH);
+        digitalWrite(LED_HEATER, LOW);
+      }
+
+      else if (temp <= fanThreshold && temp >= heaterThreshold) {
+        digitalWrite(LED_FAN, LOW);
+        digitalWrite(LED_HEATER, LOW);
+      }
+
+      else if (temp <= heaterThreshold) {
+        digitalWrite(LED_HEATER, HIGH);
+        digitalWrite(LED_FAN, LOW);
+      }
+
     }
   }
 }
