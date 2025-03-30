@@ -5,6 +5,7 @@
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
+#include <vector>
 
 #define DHTPIN 14
 #define DHTTYPE DHT22
@@ -28,13 +29,22 @@ const char* password = "";
 
 WebServer server(80);
 
-float fanThreshold = 30.0;    
-float heaterThreshold = 25.0; 
-float waterThreshold = 15.0;  
+float fanThreshold = 30.0;
+float heaterThreshold = 25.0;
+float waterThreshold = 15.0;
 
 int hours = 12, minutes = 30, seconds = 0;
 unsigned long prevMillis = 0, prevTempMillis = 0;
 float lastTemp = dht.readTemperature();
+
+struct WateringSlot {
+  int startHour;
+  int startMinute;
+  int endHour;
+  int endMinute;
+};
+
+std::vector<WateringSlot> wateringSlots;
 
 void sendHtml() {
   String html = "<!DOCTYPE html><html><head><title>Greenhouse Control</title>";
@@ -57,8 +67,21 @@ void sendHtml() {
   html += "Heater Threshold: <input type='number' name='heater' step='0.1' value='" + String(heaterThreshold) + "'><br>";
   html += "Water Threshold: <input type='number' name='water' step='0.1' value='" + String(waterThreshold) + "'><br>";
   html += "<input type='submit' value='Set Values'>";
-  html += "</form></body></html>";
-  
+  html += "</form>";
+
+  html += "<h3>Set Watering Schedule</h3>";
+  html += "<form action='/add_watering' method='POST'>";
+  html += "Start Time: <input type='time' name='start'><br>";
+  html += "End Time: <input type='time' name='end'><br>";
+  html += "<input type='submit' value='Add Watering Time'>";
+  html += "</form>";
+
+  html += "<h3>Current Watering Schedule</h3><ul>";
+  for (const auto& time : wateringSlots) {
+    html += "<li>" + String(time.startHour) + ":" + String(time.startMinute) + " - " + String(time.endHour) + ":" + String(time.endMinute) + "</li>";
+  }
+  html += "</ul></body></html>";
+
   server.send(200, "text/html", html);
 }
 
@@ -67,6 +90,7 @@ void handleSetValues() {
   if (server.hasArg("heater")) heaterThreshold = server.arg("heater").toFloat();
   if (server.hasArg("water")) waterThreshold = server.arg("water").toFloat();
   
+  // کنترل LEDها بر اساس مقدار جدید
   float temp = dht.readTemperature();
   if (!isnan(temp)) {
     digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
@@ -77,6 +101,17 @@ void handleSetValues() {
   sendHtml();
 }
 
+void handleAddWatering() {
+  if (server.hasArg("start") && server.hasArg("end")) {
+    String startTime = server.arg("start");
+    String endTime = server.arg("end");
+    WateringSlot newTime;
+    sscanf(startTime.c_str(), "%d:%d", &newTime.startHour, &newTime.startMinute);
+    sscanf(endTime.c_str(), "%d:%d", &newTime.endHour, &newTime.endMinute);
+    wateringSlots.push_back(newTime);
+  }
+  sendHtml();
+}
 
 void sendStatus() {
   String json = "{";
@@ -86,7 +121,7 @@ void sendStatus() {
   json += "\"heater\":\"" + String(heaterThreshold) + "\",";
   json += "\"water\":\"" + String(waterThreshold) + "\"";
   json += "}";
-  
+
   server.send(200, "application/json", json);
 }
 
@@ -108,11 +143,12 @@ void setup() {
   lcd.print("Time: --:--:--");
   lcd.setCursor(0, 1);
   lcd.print("Temp: --.- C");
-  
+
   server.on("/", sendHtml);
   server.on("/status", sendStatus);
   server.on("/set", HTTP_POST, handleSetValues);
-  
+  server.on("/add_watering", HTTP_POST, handleAddWatering);
+
   server.begin();
   Serial.println("\nConnected! Open http://" + WiFi.localIP + "in your browser.");
 }
@@ -122,7 +158,7 @@ void loop() {
 
   unsigned long currentMillis = millis();
 
-  if (currentMillis - prevMillis >= 1000) { 
+  if (currentMillis - prevMillis >= 1000) {
     prevMillis = currentMillis;
     seconds++;
     if (seconds == 60) { seconds = 0; minutes++; }
@@ -136,7 +172,7 @@ void loop() {
     lcd.print(timeStr);
   }
 
-  if (currentMillis - prevTempMillis >= 1000) {  
+  if (currentMillis - prevTempMillis >= 1000) {
     prevTempMillis = currentMillis;
     float temp = dht.readTemperature();
 
@@ -151,22 +187,19 @@ void loop() {
       lcd.print(temp);
       lcd.print(" C  ");
 
-      
-      if (temp >= fanThreshold) {
-        digitalWrite(LED_FAN, HIGH);
-        digitalWrite(LED_HEATER, LOW);
-      }
+      digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
+      digitalWrite(LED_HEATER, temp <= heaterThreshold ? HIGH : LOW);
+      digitalWrite(LED_WATER, temp <= waterThreshold ? HIGH : LOW);
+    }
+  }
 
-      else if (temp <= fanThreshold && temp >= heaterThreshold) {
-        digitalWrite(LED_FAN, LOW);
-        digitalWrite(LED_HEATER, LOW);
-      }
+  for (int i = 0; i < wateringSlots.size(); i++) {
+    if (hours == wateringSlots[i].startHour && minutes == wateringSlots[i].startMinute) {
+      digitalWrite(LED_WATER, HIGH);
+    }
 
-      else if (temp <= heaterThreshold) {
-        digitalWrite(LED_HEATER, HIGH);
-        digitalWrite(LED_FAN, LOW);
-      }
-
+    if (hours == wateringSlots[i].endHour && minutes == wateringSlots[i].endMinute) {
+      digitalWrite(LED_WATER, LOW);
     }
   }
 }
