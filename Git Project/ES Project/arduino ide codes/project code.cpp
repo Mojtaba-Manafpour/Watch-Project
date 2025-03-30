@@ -77,8 +77,10 @@ void sendHtml() {
   html += "</form>";
 
   html += "<h3>Current Watering Schedule</h3><ul>";
-  for (const auto& time : wateringSlots) {
-    html += "<li>" + String(time.startHour) + ":" + String(time.startMinute) + " - " + String(time.endHour) + ":" + String(time.endMinute) + "</li>";
+  for (int i = 0; i < wateringSlots.size(); i++) {
+    html += "<li>" + String(wateringSlots[i].startHour) + ":" + String(wateringSlots[i].startMinute) + " - " + 
+            String(wateringSlots[i].endHour) + ":" + String(wateringSlots[i].endMinute) + 
+            " <a href='/delete_watering?index=" + String(i) + "'>Delete</a></li>";
   }
   html += "</ul></body></html>";
 
@@ -109,6 +111,16 @@ void handleAddWatering() {
     sscanf(startTime.c_str(), "%d:%d", &newTime.startHour, &newTime.startMinute);
     sscanf(endTime.c_str(), "%d:%d", &newTime.endHour, &newTime.endMinute);
     wateringSlots.push_back(newTime);
+  }
+  sendHtml();
+}
+
+void handleDeleteWatering() {
+  if (server.hasArg("index")) {
+    int index = server.arg("index").toInt();
+    if (index >= 0 && index < wateringSlots.size()) {
+      wateringSlots.erase(wateringSlots.begin() + index);
+    }
   }
   sendHtml();
 }
@@ -148,6 +160,7 @@ void setup() {
   server.on("/status", sendStatus);
   server.on("/set", HTTP_POST, handleSetValues);
   server.on("/add_watering", HTTP_POST, handleAddWatering);
+  server.on("/delete_watering", HTTP_GET, handleDeleteWatering);
 
   server.begin();
   Serial.println("\nConnected! Open http://" + WiFi.localIP + "in your browser.");
@@ -158,7 +171,7 @@ void loop() {
 
   unsigned long currentMillis = millis();
 
-  if (currentMillis - prevMillis >= 1000) {
+  if (currentMillis - prevMillis >= 1000) { 
     prevMillis = currentMillis;
     seconds++;
     if (seconds == 60) { seconds = 0; minutes++; }
@@ -172,7 +185,7 @@ void loop() {
     lcd.print(timeStr);
   }
 
-  if (currentMillis - prevTempMillis >= 1000) {
+  if (currentMillis - prevTempMillis >= 1000) {  
     prevTempMillis = currentMillis;
     float temp = dht.readTemperature();
 
