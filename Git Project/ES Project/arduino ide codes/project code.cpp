@@ -6,34 +6,39 @@
 #include <DHT.h>
 #include <DHT_U.h>
 #include <vector>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
-#define DHTPIN 14
-#define DHTTYPE DHT22
+WiFiUDP udp;
+NTPClient timeClient(udp, "pool.ntp.org", 0, 60000); 
+
+#define DHTPIN 33
+#define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
-#define LED_FAN 19
-#define LED_HEATER 23
-#define LED_WATER 0
+#define LED_FAN 18
+#define LED_HEATER 4
+#define LED_WATER 32
 
-#define RS 2 
-#define EN 4
-#define D4 16 
-#define D5 17 
-#define D6 5  
-#define D7 18  
+#define RS 13 
+#define EN 12
+#define D4 25
+#define D5 26
+#define D6 27  
+#define D7 14  
 
 LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
 
 const char* ssid = "UTEL";
-const char* password = "";
+const char* password = "1570420246";
 
 WebServer server(80);
 
-float fanThreshold = 30.0;
-float heaterThreshold = 25.0;
-float waterThreshold = 15.0;
+float fanThreshold = 25.00;
+float heaterThreshold = 20.00;
+float waterThreshold = 15.00;
 
-int hours = 12, minutes = 30, seconds = 0;
+int hours = 12, minutes = 00, seconds = 0;
 unsigned long prevMillis = 0, prevTempMillis = 0;
 float lastTemp = dht.readTemperature();
 
@@ -49,38 +54,51 @@ std::vector<WateringSlot> wateringSlots;
 void sendHtml() {
   String html = "<!DOCTYPE html><html><head><title>Greenhouse Control</title>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  
+  html += "<style>";
+  html += "body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f4; }";
+  html += "h2 { color: #4CAF50; }";
+  html += "p { font-size: 18px; }";
+  html += "span { font-weight: bold; color: #333; }";
+  html += "input { padding: 5px; margin: 5px; }";
+  html += "button { background: #4CAF50; color: white; padding: 10px; border: none; cursor: pointer; }";
+  html += "button:hover { background: #45a049; }";
+  html += "</style>";
+
   html += "<script>function updateData() { fetch('/status').then(response => response.json()).then(data => {";
   html += "document.getElementById('time').innerText = data.time;";
   html += "document.getElementById('temp').innerText = data.temperature + ' C';";
   html += "document.getElementById('fan').innerText = data.fan;";
   html += "document.getElementById('heater').innerText = data.heater;";
   html += "document.getElementById('water').innerText = data.water;";
-  html += "});} setInterval(updateData, 2000);</script></head><body>";
+  html += "});} setInterval(updateData, 1000);</script></head><body>";
+
   html += "<h2>Greenhouse Control Panel</h2>";
-  html += "<p>Time: <span id='time'>--:--:--</span></p>";
-  html += "<p>Temperature: <span id='temp'>--.- C</span></p>";
-  html += "<p>Fan: <span id='fan'>OFF</span></p>";
-  html += "<p>Heater: <span id='heater'>OFF</span></p>";
-  html += "<p>Water: <span id='water'>OFF</span></p>";
+  html += "<p> Time: <span id='time'>--:--:--</span></p>";
+  html += "<p> Temperature: <span id='temp'>--.- C</span></p>";
+  html += "<p> Fan: <span id='fan'>OFF</span></p>";
+  html += "<p> Heater: <span id='heater'>OFF</span></p>";
+  html += "<p> Water: <span id='water'>OFF</span></p>";
+  
   html += "<form action='/set' method='POST'>";
   html += "Fan Threshold: <input type='number' name='fan' step='0.1' value='" + String(fanThreshold) + "'><br>";
   html += "Heater Threshold: <input type='number' name='heater' step='0.1' value='" + String(heaterThreshold) + "'><br>";
   html += "Water Threshold: <input type='number' name='water' step='0.1' value='" + String(waterThreshold) + "'><br>";
-  html += "<input type='submit' value='Set Values'>";
+  html += "<button type='submit'> Set Values</button>";
   html += "</form>";
 
   html += "<h3>Set Watering Schedule</h3>";
   html += "<form action='/add_watering' method='POST'>";
   html += "Start Time: <input type='time' name='start'><br>";
   html += "End Time: <input type='time' name='end'><br>";
-  html += "<input type='submit' value='Add Watering Time'>";
+  html += "<button type='submit'> Add Watering Time</button>";
   html += "</form>";
 
   html += "<h3>Current Watering Schedule</h3><ul>";
   for (int i = 0; i < wateringSlots.size(); i++) {
     html += "<li>" + String(wateringSlots[i].startHour) + ":" + String(wateringSlots[i].startMinute) + " - " + 
             String(wateringSlots[i].endHour) + ":" + String(wateringSlots[i].endMinute) + 
-            " <a href='/delete_watering?index=" + String(i) + "'>Delete</a></li>";
+            " <a href='/delete_watering?index=" + String(i) + "'><button> Delete</button></a></li>";
   }
   html += "</ul></body></html>";
 
@@ -91,13 +109,22 @@ void handleSetValues() {
   if (server.hasArg("fan")) fanThreshold = server.arg("fan").toFloat();
   if (server.hasArg("heater")) heaterThreshold = server.arg("heater").toFloat();
   if (server.hasArg("water")) waterThreshold = server.arg("water").toFloat();
-  
-  // کنترل LEDها بر اساس مقدار جدید
+
   float temp = dht.readTemperature();
   if (!isnan(temp)) {
-    digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
-    digitalWrite(LED_HEATER, temp <= heaterThreshold ? HIGH : LOW);
-    digitalWrite(LED_WATER, temp <= waterThreshold ? HIGH : LOW);
+    if (temp >= fanThreshold) {
+      digitalWrite(LED_FAN, HIGH);
+      digitalWrite(LED_HEATER, LOW);
+    }
+    else if (temp <= fanThreshold && temp >= heaterThreshold) {
+      digitalWrite(LED_HEATER, LOW);
+      digitalWrite(LED_FAN, LOW);
+
+    }
+    else if (temp <= heaterThreshold) {
+      digitalWrite(LED_HEATER, HIGH);
+      digitalWrite(LED_FAN, LOW);
+    }
   }
 
   sendHtml();
@@ -112,6 +139,17 @@ void handleAddWatering() {
     sscanf(endTime.c_str(), "%d:%d", &newTime.endHour, &newTime.endMinute);
     wateringSlots.push_back(newTime);
   }
+
+  for (int i = 0; i < wateringSlots.size(); i++) {
+    if (hours == wateringSlots[i].startHour && minutes == wateringSlots[i].startMinute) {
+      digitalWrite(LED_WATER, HIGH);
+    }
+
+    if (hours == wateringSlots[i].endHour && minutes == wateringSlots[i].endMinute) {
+      digitalWrite(LED_WATER, LOW);
+    }
+  }
+
   sendHtml();
 }
 
@@ -122,6 +160,17 @@ void handleDeleteWatering() {
       wateringSlots.erase(wateringSlots.begin() + index);
     }
   }
+
+  for (int i = 0; i < wateringSlots.size(); i++) {
+    if (hours == wateringSlots[i].startHour && minutes == wateringSlots[i].startMinute) {
+      digitalWrite(LED_WATER, HIGH);
+    }
+
+    if (hours == wateringSlots[i].endHour && minutes == wateringSlots[i].endMinute) {
+      digitalWrite(LED_WATER, LOW);
+    }
+  }
+  
   sendHtml();
 }
 
@@ -155,6 +204,14 @@ void setup() {
   lcd.print("Time: --:--:--");
   lcd.setCursor(0, 1);
   lcd.print("Temp: --.- C");
+  
+  timeClient.begin();  
+  timeClient.setTimeOffset(12600); 
+
+  timeClient.update();
+  hours = timeClient.getHours();
+  minutes = timeClient.getMinutes();
+  seconds = timeClient.getSeconds();
 
   server.on("/", sendHtml);
   server.on("/status", sendStatus);
@@ -191,6 +248,9 @@ void loop() {
 
     if (!isnan(temp) && temp != lastTemp) {
       lastTemp = temp;
+      Serial.print("ESP32 IP Address: ");
+      Serial.println(WiFi.localIP());
+      
       Serial.print("Temp: ");
       Serial.print(temp);
       Serial.println(" C");
@@ -200,9 +260,18 @@ void loop() {
       lcd.print(temp);
       lcd.print(" C  ");
 
-      digitalWrite(LED_FAN, temp >= fanThreshold ? HIGH : LOW);
-      digitalWrite(LED_HEATER, temp <= heaterThreshold ? HIGH : LOW);
-      digitalWrite(LED_WATER, temp <= waterThreshold ? HIGH : LOW);
+      if (temp >= fanThreshold) {
+      digitalWrite(LED_FAN, HIGH);
+      digitalWrite(LED_HEATER, LOW);
+      }
+      else if (temp <= fanThreshold && temp >= heaterThreshold) {
+        digitalWrite(LED_HEATER, LOW);
+        digitalWrite(LED_FAN, LOW);
+      }
+      else if (temp <= heaterThreshold) {
+        digitalWrite(LED_HEATER, HIGH);
+        digitalWrite(LED_FAN, LOW);
+      }
     }
   }
 
